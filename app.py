@@ -1,53 +1,64 @@
 from flask import Flask, request, jsonify
 from openai import OpenAI
 import os
+import json
 
 app = Flask(__name__)
 
-# OpenAI client
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
 
 @app.route("/alexa", methods=["POST"])
 def alexa():
     data = request.get_json()
 
-    print("REQUEST COMPLETO ALEXA:", data)
+    print("\n================ NUEVA REQUEST ================\n")
 
-    # 🔥 obtener pregunta robusto
-    pregunta = "hola"
+    # 🔥 LOG 1: TODO lo que manda Alexa
+    print("RAW ALEXA JSON:")
+    print(json.dumps(data, indent=2, ensure_ascii=False))
+
+    # 🔥 intento sacar pregunta desde slot
+    pregunta = None
+
     try:
-        if data.get("request", {}).get("type") == "IntentRequest":
-            intent = data["request"].get("intent", {})
-            slots = intent.get("slots", {})
-
-            if "question" in slots and "value" in slots["question"]:
-                pregunta = slots["question"]["value"]
-
+        pregunta = data["request"]["intent"]["slots"]["question"]["value"]
+        print("\nSLOT QUESTION DETECTADO:", pregunta)
     except Exception as e:
-        print("ERROR PARSEANDO INPUT:", e)
+        print("\nNO HAY SLOT QUESTION:", e)
 
-    print("PREGUNTA:", pregunta)
+    # 🔥 fallback PRO (esto es clave)
+    if not pregunta:
+        pregunta = data["request"].get("inputTranscript")
+
+        if pregunta:
+            print("\nUSANDO inputTranscript:", pregunta)
+
+    # 🔥 fallback final
+    if not pregunta:
+        pregunta = "hola"
+        print("\nFALLBACK A 'hola'")
+
+    print("\nPREGUNTA FINAL QUE SE ENVÍA A OPENAI:", pregunta)
 
     # 🔥 llamada a OpenAI
     try:
-        respuesta = client.responses.create(
+        response = client.responses.create(
             model="gpt-4.1-mini",
             input=pregunta
         )
 
-        print("RESPUESTA OPENAI RAW:", respuesta)
+        texto = response.output[0].content[0].text
 
-        # 🔥 parsing + marca clara
-        texto = "SOY CHATGPT: " + respuesta.output[0].content[0].text
-
-        if not texto:
-            texto = "no pude generar respuesta"
+        print("\nRESPUESTA OPENAI:")
+        print(texto)
 
     except Exception as e:
-        print("ERROR OPENAI:", e)
+        print("\nERROR OPENAI:", e)
         texto = "Hubo un problema al consultar la inteligencia artificial"
 
-    # 🔥 respuesta Alexa
+    print("\n================ FIN REQUEST ================\n")
+
     return jsonify({
         "version": "1.0",
         "response": {
@@ -55,17 +66,16 @@ def alexa():
                 "type": "PlainText",
                 "text": texto
             },
-            "shouldEndSession": False
+            "shouldEndSession": True
         }
     })
 
+
 @app.route("/ping")
 def ping():
+    print("PING OK")
     return "alive"
 
-@app.route("/")
-def home():
-    return "ok"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
